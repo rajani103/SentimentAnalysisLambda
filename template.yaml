@@ -1,0 +1,75 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Lambda function for sentiment analysis of text files uploaded to S3
+
+Resources:
+  SentimentAnalysisFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Timeout: 30
+      MemorySize: 256
+      Policies:
+        - S3ReadPolicy:
+            BucketName: !Ref TextFilesBucket
+        - DynamoDBCrudPolicy:
+            TableName: !Ref SentimentResultsTable
+        - ComprehendBasicAccessPolicy: {}
+      Events:
+        S3Event:
+          Type: S3
+          Properties:
+            Bucket: !Ref TextFilesBucket
+            Events: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: suffix
+                    Value: .txt
+
+  TextFilesBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: s3:ObjectCreated:*
+            Function: !GetAtt SentimentAnalysisFunction.Arn
+            Filter:
+              S3Key:
+                Rules:
+                  - Name: suffix
+                    Value: .txt
+    DependsOn: LambdaInvokePermission
+
+  LambdaInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref SentimentAnalysisFunction
+      Principal: s3.amazonaws.com
+      SourceArn: !Sub arn:aws:s3:::${TextFilesBucket}
+
+  SentimentResultsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: SentimentResults
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: filename
+          AttributeType: S
+      KeySchema:
+        - AttributeName: filename
+          KeyType: HASH
+
+Outputs:
+  SentimentAnalysisFunction:
+    Description: "Sentiment Analysis Lambda Function ARN"
+    Value: !GetAtt SentimentAnalysisFunction.Arn
+  TextFilesBucket:
+    Description: "S3 bucket for text files"
+    Value: !Ref TextFilesBucket
+  SentimentResultsTable:
+    Description: "DynamoDB table for sentiment results"
+    Value: !Ref SentimentResultsTable
